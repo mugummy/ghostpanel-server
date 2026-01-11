@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --main-bg: #111111;
+  --panel-bg: #1a1a1a;
+  --border-color: #333333;
+  --accent-cyan: #00ffff;
+  --accent-hover: #2a2a2a;
+}
+
+body {
+  background-color: var(--main-bg);
+  color: #e0e0e0;
+  font-family: 'Inter', sans-serif;
+  overflow: hidden;
+}
+
+/* Custom Scrollbar to match the vibe */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--main-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+.icon-rail-item {
+  @apply text-gray-400 hover:text-cyan-400 hover:bg-[#222] transition-all duration-200 cursor-pointer p-3 rounded-lg flex justify-center items-center relative;
+}
+
+.icon-rail-item.active {
+  @apply text-cyan-400 bg-[#1a1a1a] shadow-[inset_2px_0_0_0_#00ffff];
+}
