@@ -1,3 +1,6 @@
+#define _WIN32_WINNT 0x0600
+#define _CRT_SECURE_NO_WARNINGS
+
 #include <winsock2.h>
 #include <windows.h>
 #include <ws2tcpip.h>
@@ -13,6 +16,9 @@
 #include <sstream>
 #include <time.h>
 #include <wbemidl.h>
+#include <cstdio>
+#include <cstring>
+#include <cwchar>
 
 #define MINIAUDIO_IMPLEMENTATION
 #define MA_NO_DECODING
