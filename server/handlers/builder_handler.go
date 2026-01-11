@@ -103,7 +103,7 @@ func BuildHandler(w http.ResponseWriter, r *http.Request) {
         "-shared", // IMPORTANT: Build as DLL to generate export table for 'MainThread'
 	}
 
-	cmd := exec.Command("g++", args...)
+	cmd := exec.Command("x86_64-w64-mingw32-g++", args...)
 	output, err := cmd.CombinedOutput()
 	os.Remove(tempFile) // Cleanup temp agent source
 
@@ -158,7 +158,7 @@ func BuildHandler(w http.ResponseWriter, r *http.Request) {
 	absOut, _ := filepath.Abs(resObj)
 	
 	// IMPORTANT: Specify target arch for windres!
-	resCmd := exec.Command("windres", "-F", "pe-x86-64", "temp_resource.rc", "-o", absOut)
+	resCmd := exec.Command("x86_64-w64-mingw32-windres", "-F", "pe-x86-64", "temp_resource.rc", "-o", absOut)
 	resCmd.Dir = "templates" 
 	
 	if output, err := resCmd.CombinedOutput(); err != nil {
@@ -184,7 +184,7 @@ func BuildHandler(w http.ResponseWriter, r *http.Request) {
 			"-lwinmm", "-lwininet", "-lwinhttp", "-liphlpapi", "-lnetapi32",
 			"-lstrmiids",
 		}
-	stubCmd := exec.Command("g++", stubArgs...)
+	stubCmd := exec.Command("x86_64-w64-mingw32-g++", stubArgs...)
 	stubOutput, err := stubCmd.CombinedOutput()
 	os.Remove(tempStub)
 
