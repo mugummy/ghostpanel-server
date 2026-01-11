@@ -1,5 +1,5 @@
 # Build Stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.21 AS builder
 
 WORKDIR /app
 
@@ -10,17 +10,23 @@ RUN go mod download
 # Copy source
 COPY . .
 
-# Build the server
+# Build the server (Static build)
 RUN CGO_ENABLED=0 GOOS=linux go build -o ghostpanel-server main.go
 
-# Runtime Stage
-FROM alpine:latest
+# Runtime Stage (Switch to Ubuntu for reliable MinGW)
+FROM ubuntu:22.04
 
 WORKDIR /app
 
-# Install basic tools and cross-compiler for Windows (from edge community repo)
-RUN apk --no-cache add ca-certificates \
-    && apk add --no-cache --repository=http://dl-cdn.alpinelinux.org/alpine/edge/community mingw-w64-gcc mingw-w64-headers
+# Prevent interactive prompts during install
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install MinGW-w64 (Windows Cross Compiler) and essential tools
+RUN apt-get update && apt-get install -y \
+    mingw-w64 \
+    build-essential \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy binary from builder
 COPY --from=builder /app/ghostpanel-server .
