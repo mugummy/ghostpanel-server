@@ -18,8 +18,8 @@ FROM alpine:latest
 
 WORKDIR /app
 
-# Install basic tools
-RUN apk --no-cache add ca-certificates
+# Install basic tools and cross-compiler for Windows
+RUN apk --no-cache add ca-certificates mingw-w64
 
 # Copy binary from builder
 COPY --from=builder /app/ghostpanel-server .
