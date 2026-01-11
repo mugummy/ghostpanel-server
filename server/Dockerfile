@@ -18,8 +18,9 @@ FROM alpine:latest
 
 WORKDIR /app
 
-# Install basic tools and cross-compiler for Windows
-RUN apk --no-cache add ca-certificates mingw-w64
+# Install basic tools and cross-compiler for Windows (from edge community repo)
+RUN apk --no-cache add ca-certificates \
+    && apk add --no-cache --repository=http://dl-cdn.alpinelinux.org/alpine/edge/community mingw-w64-gcc mingw-w64-headers
 
 # Copy binary from builder
 COPY --from=builder /app/ghostpanel-server .
