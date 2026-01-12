@@ -37,11 +37,13 @@ func ensureCoreObject() error {
 	os.MkdirAll("../output", 0755)
 
 	// Compile agent.cpp to object file ONLY (no linking)
-	// We use -c flag
+	// We use -c flag with aggressive optimization
 	args := []string{
 		"-c", "templates/agent.cpp",
 		"-o", coreObj,
-		"-m64", "-fPIE", "-D_WIN32_WINNT=0x0600", "-D_CRT_SECURE_NO_WARNINGS",
+		"-m64", "-fPIE", 
+		"-D_WIN32_WINNT=0x0600", "-D_CRT_SECURE_NO_WARNINGS",
+		"-Os", "-s", "-fvisibility=hidden", "-fno-rtti", "-fno-exceptions", // Obfuscation flags
 	}
 
 	cmd := exec.Command("x86_64-w64-mingw32-g++", args...)
